@@ -142,7 +142,7 @@ body {
           <div class="zone"><b>Bal oldal</b><span>bal flipper</span></div>
           <div class="zone"><b>Jobb oldal</b><span>jobb flipper</span></div>
         </div>
-        <p class="launch"><b>Indítás:</b> tartsd nyomva a jobb oldalt, majd engedd el. Minél tovább tartod, annál erősebb a lövés.</p>
+        <p class="launch"><b>Indítás:</b> tartsd nyomva a jobb oldalt, majd engedd el. Minél tovább tartod, annál erősebb a lövés. Ha a golyó a villogó felső sávba esik, ügyességi bónusz jár.</p>
         <p class="keys">Billentyűzet: Z és M (vagy ← →) a flipperek, szóköz az indítás, P a szünet.</p>
         <button class="cta" id="startBtn" type="button">Játék indítása</button>
         <p class="record">Rekord: <b id="hiTitle">0</b></p>
@@ -217,11 +217,13 @@ const ORBIT_WALL = [[56, 250], [56, 440]];
 poly(ORBIT_WALL, { e: 0.4 });
 const DIVIDERS = [130, 170, 210, 250];
 DIVIDERS.forEach(x => seg(x, 70, x, 108, { e: 0.4 }));
-const GUIDE_L = [[46, 530], [46, 612], [112, 644]], GUIDE_R = mirror(GUIDE_L);
+const GUIDE_L = [[46, 510], [46, 612], [112, 644]], GUIDE_R = mirror(GUIDE_L);
 poly(GUIDE_L, { e: 0.3 }); poly(GUIDE_R, { e: 0.3 });
-// deflectors above the outlanes: balls sliding down a side wall are steered into the inlanes
-const DEFLECT_L = [[20, 468], [42, 508]], DEFLECT_R = mirror(DEFLECT_L);
-poly(DEFLECT_L, { e: 0.3 }); poly(DEFLECT_R, { e: 0.3 });
+// deflectors above the outlanes: balls sliding down a side wall are steered into the inlanes;
+// the right one continues the wedge under the drop-target bank
+const DEFLECT_L = [[20, 452], [41, 488]], DEFLECT_R = [[352, 452], [334, 490]];
+seg(...DEFLECT_L[0], ...DEFLECT_L[1], { e: 0.3, side: [60, 440] });  // one-way, so the kickback can fire up through it
+poly(DEFLECT_R, { e: 0.3 });
 const SLING_PTS = [[[74, 535], [74, 600], [112, 618]]];
 SLING_PTS.push(mirror(SLING_PTS[0]));
 const slings = SLING_PTS.map(p => {
@@ -237,6 +239,46 @@ const BANK_DEFLECTOR = [[336, 392], [318, 422], [352, 452]];  // closed wedge un
 poly(BANK_DEFLECTOR, { e: 0.3 });
 const targets = [0, 1, 2].map(i => seg(336, 302 + i * 32, 336, 328 + i * 32, { e: 0.3, tag: 'target' }));
 
+// ramp: an entrance channel on the playfield; past its lip the ball follows a fixed elevated path
+const RAMP_M = [248, 392], RAMP_D = [0.243, -0.970], RAMP_N = [0.970, 0.243];
+const RAMP_HW = 15, RAMP_LEN = 44, RAMP_PULL = 2200;
+const rampPt = (u, v) => [RAMP_M[0] + RAMP_D[0] * u + RAMP_N[0] * v, RAMP_M[1] + RAMP_D[1] * u + RAMP_N[1] * v];
+const rampLocal = b => {
+  const x = b.x - RAMP_M[0], y = b.y - RAMP_M[1];
+  return [x * RAMP_D[0] + y * RAMP_D[1], x * RAMP_N[0] + y * RAMP_N[1]];
+};
+const inRampMouth = ([u, v]) => u > 0 && u < RAMP_LEN && Math.abs(v) < RAMP_HW;
+const RAMP_WALL_L = [rampPt(0, -RAMP_HW), rampPt(RAMP_LEN, -RAMP_HW)];
+const RAMP_WALL_R = [rampPt(0, RAMP_HW), rampPt(RAMP_LEN, RAMP_HW)];
+poly(RAMP_WALL_L, { e: 0.35 }); poly(RAMP_WALL_R, { e: 0.35 });
+seg(...RAMP_WALL_L[1], ...RAMP_WALL_R[1], { e: 0.3, side: rampPt(RAMP_LEN + 30, 0) });
+function catmull(pts, per) {
+  const out = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    for (let k = 0; k < per; k++) {
+      const t = k / per, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1].map(j => 0.5 * (2 * p1[j] + (p2[j] - p0[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (3 * p1[j] - p0[j] - 3 * p2[j] + p3[j]) * t3)));
+    }
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+const RAMP_PATH = catmull([rampPt(RAMP_LEN, 0), [264, 305], [274, 258], [292, 224], [312, 210], [326, 228], [320, 290], [312, 380], [308, 460], [312, 515]], 10);
+const RAMP_S = [0];
+for (let i = 1; i < RAMP_PATH.length; i++) RAMP_S.push(RAMP_S[i - 1] + Math.hypot(RAMP_PATH[i][0] - RAMP_PATH[i - 1][0], RAMP_PATH[i][1] - RAMP_PATH[i - 1][1]));
+const RAMP_TOTAL = RAMP_S[RAMP_S.length - 1];
+function rampAt(s) { // position and unit tangent at arc length s
+  let i = 1;
+  while (i < RAMP_S.length - 1 && RAMP_S[i] < s) i++;
+  const a = RAMP_PATH[i - 1], b = RAMP_PATH[i], k = (s - RAMP_S[i - 1]) / ((RAMP_S[i] - RAMP_S[i - 1]) || 1);
+  const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+  return [a[0] + dx * k, a[1] + dy * k, dx / l, dy / l];
+}
+
+const WORMS = [{ x: 175, y: 455, rgb: '70,240,255', flash: 0 }, { x: 300, y: 122, rgb: '180,140,255', flash: 0 }];
+const SPINNER = { x: 38, y: 405, hw: 16, angle: 0, omega: 0 };
+
 const bumpers = [[150, 178], [232, 172], [192, 240]].map(([x, y]) => ({ x, y, r: 20, flash: 0, cd: 0 }));
 const HOLE = { x: 108, y: 338 };
 const sensors = [
@@ -248,8 +290,11 @@ const sensors = [
 const ARROWS = {
   orbit: { x: 38, y: 476, a: -Math.PI / 2 },
   hole: { x: 132, y: 392, a: -1.99 },
-  bank: { x: 306, y: 432, a: -1.23 },
+  bank: { x: 282, y: 446, a: -1.07 },
   lanes: { x: 190, y: 302, a: -Math.PI / 2 },
+  ramp: { x: 236, y: 428, a: -1.326 },
+  worm: { x: 175, y: 494, a: -Math.PI / 2 },
+  kick: { x: 33, y: 640, a: -Math.PI / 2 },
 };
 const MULT_INS = [2, 3, 4, 5].map((m, i) => ({ m, x: 151.5 + i * 23, y: 572 }));
 const EXTRA_INS = { x: 186, y: 600 }, SAVE_INS = { x: 186, y: 628 };
@@ -266,8 +311,11 @@ const RANKS = ['Kadét', 'Pilóta', 'Hadnagy', 'Főhadnagy', 'Százados', 'Őrna
 const MISSIONS = [
   { k: 'bank', n: 1, label: 'Aszteroidák', arrow: 'bank' },
   { k: 'orbit', n: 2, label: 'Orbit', arrow: 'orbit' },
+  { k: 'ramp', n: 2, label: 'Rámpa', arrow: 'ramp' },
   { k: 'bumper', n: 15, label: 'Bumperek', arrow: 'lanes' },
+  { k: 'worm', n: 1, label: 'Féreglyuk', arrow: 'worm' },
   { k: 'hole', n: 1, label: 'Fekete lyuk', arrow: 'hole' },
+  { k: 'spinner', n: 16, label: 'Pörgettyű', arrow: 'orbit' },
   { k: 'lanes', n: 1, label: 'Felső sávok', arrow: 'lanes' },
 ];
 const G = { state: 'title', hi: store.get('hi', 0), anim: 0 };
@@ -280,32 +328,38 @@ function resetGame() {
     lanes: [0, 0, 0], laneFlash: 0, holeCount: 0, multiball: false, ejectQ: 0, ejectT: 0,
     saveT: 0, saveArmed: true, serve: 1, auto: 0, autoT: 0, bankReset: 0,
     phase: 'run', phaseT: 0, msg: null, msgQ: [], launched: false, newRecord: false,
+    kick: true, kickCharge: 0, kickAnim: 0, wormT: 0, skillArmed: true, skillActive: 0, skillLane: 1, skillT: 0,
   });
+  SPINNER.angle = SPINNER.omega = 0;
   balls = []; popups = [];
   targets.forEach(t => { t.on = true; });
   plunger.charge = plunger.pos = 0; plunger.held = false;
 }
 
-const newBall = (x, y) => ({ x, y, vx: 0, vy: 0, capt: false, capT: 0, fromX: 0, fromY: 0, noCap: 0, still: 0, inside: new Set() });
+const newBall = (x, y) => ({
+  x, y, px: x, py: y, vx: 0, vy: 0, capt: false, capT: 0, fromX: 0, fromY: 0, noCap: 0, still: 0, inside: new Set(),
+  ramp: null, warp: null, noWarp: 0, kickT: 0,
+});
 const inLane = b => !b.capt && b.x > 352 && b.y > 250;
 const laneBall = () => balls.find(b => !b.capt && b.x > 352 && b.y > 560);
 function laneReady() { const b = laneBall(); return !!b && b.y > 690 && Math.abs(b.vy) < 40; }
-const need = () => MISSIONS[G.mission % 5].n * (1 + Math.floor(G.mission / 5));
+const need = () => MISSIONS[G.mission % MISSIONS.length].n * (1 + Math.floor(G.mission / MISSIONS.length));
 
 function addScore(n) { G.score += n; }
 function popup(x, y, text) { if (popups.length < 12) popups.push({ x, y, text, t: 1 }); }
 function msg(big, small, dur = 1.6) { if (G.msgQ.length < 4) G.msgQ.push({ big, small, dur, t: 0 }); }
 
 function progress(k) {
-  if (MISSIONS[G.mission % 5].k !== k) return;
+  if (MISSIONS[G.mission % MISSIONS.length].k !== k) return;
   if (++G.prog < need()) return;
   G.mission++; G.prog = 0;
   const reward = 10000 * (G.rank + 1);
   addScore(reward);
-  if (G.rank < RANKS.length - 1) G.rank++;
+  const promoted = G.rank < RANKS.length - 1;
+  if (promoted) G.rank++;
   msg(RANKS[G.rank], 'Előléptetés +' + fmt(reward), 2.4);
   audio.mission();
-  if (G.rank % 3 === 2) { G.extra++; msg('Extra', 'Extra golyó jár', 1.6); }
+  if (promoted && G.rank % 3 === 2) { G.extra++; msg('Extra', 'Extra golyó jár', 1.6); }
 }
 
 // ---------- physics ----------
@@ -343,7 +397,7 @@ function collideBumper(b, m) {
   if (vn < 0) { b.vx -= 1.6 * vn * nx; b.vy -= 1.6 * vn * ny; vn = -0.6 * vn; }
   if (vn < 640) { b.vx += (640 - vn) * nx; b.vy += (640 - vn) * ny; }
   if (m.cd <= 0) {
-    m.cd = 0.06; m.flash = 1;
+    m.cd = 0.06; m.flash = 1; G.skillActive = 0;
     addScore(150); G.bonus += 10; popup(m.x, m.y - m.r - 4, '150');
     audio.bumper(); progress('bumper');
   }
@@ -367,7 +421,7 @@ function collideFlipper(b, f) {
 }
 
 function collideBalls(a, b) {
-  if (a.capt || b.capt) return;
+  if (a.capt || b.capt || a.ramp || b.ramp || a.warp || b.warp) return;
   let dx = b.x - a.x, dy = b.y - a.y;
   const d2 = dx * dx + dy * dy;
   if (d2 >= 4 * R * R || d2 < 1e-9) return;
@@ -383,8 +437,12 @@ function step(dt) {
   FLOOR.ay = FLOOR.by = 712 + plunger.pos * 24;
   for (let i = balls.length - 1; i >= 0; i--) {
     const b = balls[i];
-    if (b.capt) continue;
+    if (b.capt || b.warp) continue;
+    if (b.ramp) { rampStep(b, dt); continue; }
+    b.px = b.x; b.py = b.y;
     b.vy += GRAV * dt;
+    if (b.noWarp > 0) b.noWarp -= dt;
+    if (b.kickT > 0) b.kickT -= dt;
     if (b.noCap > 0) b.noCap -= dt;
     else {
       const hx = HOLE.x - b.x, hy = HOLE.y - b.y, hd = Math.hypot(hx, hy);
@@ -394,13 +452,23 @@ function step(dt) {
         b.vx += hx * a * dt; b.vy += hy * a * dt;
       }
     }
+    const mouth = inRampMouth(rampLocal(b));
+    if (mouth) { b.vx -= RAMP_D[0] * RAMP_PULL * dt; b.vy -= RAMP_D[1] * RAMP_PULL * dt; }  // the ramp's incline
     b.vx *= 1 - 0.1 * dt; b.vy *= 1 - 0.1 * dt;
     const sp = Math.hypot(b.vx, b.vy);
     if (sp > MAXV) { b.vx *= MAXV / sp; b.vy *= MAXV / sp; }
     b.x += b.vx * dt; b.y += b.vy * dt;
+    if (mouth && rampLocal(b)[0] >= RAMP_LEN) { startRamp(b); continue; }
     for (const s of segs) if (s.on) collideSeg(b, s);
     for (const m of bumpers) collideBumper(b, m);
     for (const f of flippers) collideFlipper(b, f);
+    if (b.x > 20 && b.x < 56 && (b.py - SPINNER.y) * (b.y - SPINNER.y) < 0) {
+      SPINNER.omega = Math.min(55, Math.max(SPINNER.omega, Math.abs(b.vy) / 32));
+    }
+    // open wormholes swallow balls travelling upward, so they work as shots rather than drain guards
+    if (G.wormT > 0 && b.noWarp <= 0 && b.vy < -150) for (const w of WORMS) if ((b.x - w.x) ** 2 + (b.y - w.y) ** 2 < 100) { enterWorm(b, w); break; }
+    if (b.warp) continue;
+    if (G.kick && b.vy > 0 && b.x < 46 && b.y > 660 && b.y < 700) kickback(b);
     for (const sn of sensors) {
       const inside = (b.x - sn.x) ** 2 + (b.y - sn.y) ** 2 < sn.r * sn.r;
       if (inside === b.inside.has(sn)) continue;
@@ -432,17 +500,25 @@ function dropTarget(s) {
   msg('Aszteroida', 'Mező megtisztítva', 1.8);
   audio.jingle(); progress('bank');
   G.bankReset = 1.6;
+  if (!G.kick && ++G.kickCharge >= 2) { G.kick = true; G.kickCharge = 0; msg('Kickback', 'Újra éles', 1.2); }
 }
 
 function sensorHit(sn, b) {
   if (sn.id === 'lane') laneHit(sn.i);
   else if (sn.id === 'orbit') {
-    if (b.vy < -150) { addScore(2000); G.bonus += 500; popup(38, 330, '2 000'); audio.orbit(); progress('orbit'); }
+    if (b.vy < -150 && b.kickT <= 0) { addScore(2000); G.bonus += 500; popup(38, 330, '2 000'); audio.orbit(); progress('orbit'); }
   } else if (sn.id === 'inlane') { addScore(250); G.bonus += 100; audio.target(); }
-  else if (sn.id === 'outlane') { addScore(1000); audio.lost(); }
+  else if (sn.id === 'outlane' && b.kickT <= 0) { addScore(1000); if (!(G.kick && sn.x < 186)) audio.lost(); }
 }
 
 function laneHit(i) {
+  if (G.skillActive > 0) {
+    G.skillActive = 0;
+    if (i === G.skillLane) {
+      addScore(10000); popup(sensors[i].x, 124, '10 000');
+      msg('Pontos!', 'Ügyességi lövés', 1.6); audio.skill();
+    }
+  }
   if (G.lanes[i] || G.laneFlash > 0) { addScore(100); return; }
   G.lanes[i] = 1; addScore(300); G.bonus += 200; audio.lane();
   if (!G.lanes.every(Boolean)) return;
@@ -473,11 +549,58 @@ function eject(b) {
   audio.eject();
 }
 
-function launch(charge) {
+function startRamp(b) {
+  const vd = b.vx * RAMP_D[0] + b.vy * RAMP_D[1];
+  b.ramp = { s: 0, v0: Math.min(1300, Math.max(560, vd)) };
+  [b.x, b.y] = rampAt(0);
+  G.bonus += 500; progress('ramp');
+  if (G.multiball) { addScore(25000); msg('Jackpot', 'Rámpa +25 000', 1.6); audio.jingle(); }
+  else { addScore(4000); popup(312, 196, '4 000'); msg('Rámpa', G.wormT > 0 ? '+4 000' : 'Féreglyuk nyitva', 1.2); audio.ramp(); }
+  G.wormT = 15;
+}
+
+function rampStep(b, dt) {
+  const r = b.ramp, v = Math.max(380, r.v0 * (1 - 0.4 * Math.sin(Math.PI * r.s / RAMP_TOTAL)));
+  r.s = Math.min(RAMP_TOTAL, r.s + v * dt);
+  const [x, y, tx, ty] = rampAt(r.s);
+  b.x = b.px = x; b.y = b.py = y; b.vx = tx * v; b.vy = ty * v;
+  if (r.s < RAMP_TOTAL) return;
+  const ev = Math.min(v, 520);
+  b.vx = tx * ev; b.vy = ty * ev; b.ramp = null;
+  audio.thunk();
+}
+
+function enterWorm(b, w) {
+  b.warp = { t: 0, to: WORMS[1 - WORMS.indexOf(w)] };
+  b.x = w.x; b.y = w.y; w.flash = 1; G.wormT = 0;
+  addScore(2500); G.bonus += 300; audio.warp(); progress('worm');
+  msg('Féreglyuk', '+2 500', 1);
+}
+
+function kickback(b) {
+  b.x = 31; b.vx = 0; b.vy = -1450; b.kickT = 1.2;
+  G.kick = false; G.kickAnim = 1;
+  addScore(500); audio.kick(); msg('Kickback', 'A golyó visszamegy', 1.2);
+}
+
+// plunger strength: the middle of the stroke is stretched over the few speeds that drop the ball into the top lanes
+const LAUNCH_MAP = [[0, 680], [0.3, 1238], [0.8, 1302], [1, 1760]];
+const SKILL_V = [[1288, 1300], [1265, 1280], [1240, 1256]];  // launch speeds landing in lanes 0, 1, 2
+function launchSpeed(c) {
+  for (let i = 1; i < LAUNCH_MAP.length; i++) {
+    const [c0, v0] = LAUNCH_MAP[i - 1], [c1, v1] = LAUNCH_MAP[i];
+    if (c <= c1) return v0 + (v1 - v0) * (c - c0) / (c1 - c0);
+  }
+  return LAUNCH_MAP[LAUNCH_MAP.length - 1][1];
+}
+const chargeFor = v => 0.3 + (v - 1238) / (1302 - 1238) * 0.5;
+
+function launch(charge, auto = false) {
   const b = laneBall();
   if (!b) return;
-  b.vy = -(680 + 1080 * charge); b.vx = 0;
+  b.y = 703; b.vy = -launchSpeed(charge); b.vx = 0;  // the plunger tip snaps back to its rest position
   audio.launch(charge);
+  if (!auto && G.skillArmed) { G.skillArmed = false; G.skillActive = 4; }
   if (G.saveArmed) { G.saveT = 8; G.saveArmed = false; }
   if (!G.launched) { G.launched = true; hint.hidden = true; }
 }
@@ -496,19 +619,46 @@ function onDrain() {
 }
 
 function nextBall() {
-  Object.assign(G, { phase: 'run', bonus: 0, mult: 1, lanes: [0, 0, 0], laneFlash: 0, saveArmed: true, multiball: false });
+  Object.assign(G, { phase: 'run', bonus: 0, mult: 1, lanes: [0, 0, 0], laneFlash: 0, saveArmed: true, multiball: false, skillArmed: true, skillActive: 0 });
   if (G.extra > 0) { G.extra--; msg('Újra!', 'Extra golyó', 1.6); }
   else if (++G.ballNo > 3) { G.ballNo = 3; gameOver(); return; }
   G.serve = 1;
 }
 
 function tick(dt) {
-  if (plunger.held) plunger.pos = plunger.charge = Math.min(1, plunger.charge + dt * 1.15);
+  if (plunger.held) plunger.pos = plunger.charge = Math.min(1, plunger.charge + dt * 0.8);
   else if (plunger.pos > 0) plunger.pos = Math.max(0, plunger.pos - dt * 25);
   for (const s of slings) { s.cd -= dt; s.flash = Math.max(0, s.flash - dt * 5); }
   for (const m of bumpers) { m.cd -= dt; m.flash = Math.max(0, m.flash - dt * 5); }
+  for (const w of WORMS) w.flash = Math.max(0, w.flash - dt * 2.5);
+  if (G.wormT > 0) G.wormT -= dt;
+  G.kickAnim = Math.max(0, G.kickAnim - dt * 4);
+  if (SPINNER.omega > 0) {
+    const before = Math.floor(SPINNER.angle / Math.PI);
+    SPINNER.angle += SPINNER.omega * dt;
+    const turns = Math.floor(SPINNER.angle / Math.PI) - before;
+    for (let i = 0; i < turns; i++) { addScore(100); G.bonus += 20; progress('spinner'); }
+    if (turns > 0) audio.spin();
+    SPINNER.omega *= Math.exp(-1.3 * dt);
+    if (SPINNER.omega < 0.6) { SPINNER.omega = 0; SPINNER.angle = Math.round(SPINNER.angle / Math.PI) * Math.PI; }
+  }
+  // skill shot: the target lane cycles until the player starts pulling the plunger
+  if (G.skillArmed && !plunger.held && laneReady() && (G.skillT += dt) > 0.55) { G.skillT = 0; G.skillLane = (G.skillLane + 1) % 3; }
+  if (G.skillActive > 0) {
+    G.skillActive -= dt;
+    if (laneReady() && balls.every(inLane)) { G.skillActive = 0; G.skillArmed = true; }  // weak plunge rolled back
+  }
 
   for (const b of balls) {
+    if (b.warp) {
+      if ((b.warp.t += dt) >= 0.35) {
+        const to = b.warp.to, sp = Math.hypot(b.vx, b.vy);
+        b.x = b.px = to.x; b.y = b.py = to.y;
+        if (sp < 260) { if (sp > 1) { b.vx *= 260 / sp; b.vy *= 260 / sp; } else b.vy = 260; }
+        b.noWarp = 0.8; b.warp = null; to.flash = 1; b.inside.clear();
+      }
+      continue;
+    }
     if (b.capt) {
       b.capT += dt;
       const k = Math.min(1, b.capT / 0.25);
@@ -530,10 +680,10 @@ function tick(dt) {
     G.serve--; balls.push(newBall(366, 700));
     if (G.auto > 0) { G.auto--; G.autoT = 0.7; }
   }
-  if (G.autoT > 0 && (G.autoT -= dt) <= 0) { if (laneReady()) launch(0.92); else G.autoT = 0.1; }
+  if (G.autoT > 0 && (G.autoT -= dt) <= 0) { if (laneReady()) launch(0.92, true); else G.autoT = 0.1; }
   if (G.saveT > 0 && balls.some(b => !inLane(b))) G.saveT -= dt;
   if (G.bankReset > 0 && (G.bankReset -= dt) <= 0) {
-    if (balls.some(b => b.x > 324 && b.y > 290 && b.y < 404)) G.bankReset = 0.3;
+    if (balls.some(b => !b.ramp && b.x > 324 && b.y > 290 && b.y < 404)) G.bankReset = 0.3;
     else targets.forEach(t => { t.on = true; });
   }
   if (G.laneFlash > 0 && (G.laneFlash -= dt) <= 0) G.lanes = [0, 0, 0];
@@ -598,6 +748,12 @@ const audio = (() => {
     jingle() { arp([659, 784, 988, 1319], 0.07, 'square', 0.08); },
     mission() { arp([523, 659, 784, 1047, 1319, 1568], 0.08, 'square', 0.09); },
     over() { arp([784, 659, 523, 392, 262], 0.14, 'triangle', 0.16); },
+    ramp() { tone(220, 880, 0.45, 'sawtooth', 0.07); tone(330, 1320, 0.4, 'square', 0.04, 0.05); },
+    thunk() { noise(0.06, 0.25, 600); tone(120, 70, 0.1, 'triangle', 0.2); },
+    spin() { noise(0.018, 0.12, 4200); tone(1800, 1600, 0.02, 'square', 0.03); },
+    kick() { noise(0.15, 0.35, 500); tone(70, 300, 0.2, 'square', 0.14); },
+    warp() { tone(1400, 120, 0.3, 'sine', 0.18); tone(120, 1400, 0.3, 'sine', 0.14, 0.3); },
+    skill() { arp([784, 988, 1175, 1568, 1976], 0.06, 'square', 0.09); },
   };
 })();
 
@@ -671,8 +827,9 @@ function dmdCompose() {
     dText(m.big, 0, sc === 2 ? 1 : 5, sc, v, 'center');
     dText(m.small, 0, 22, 1, 2, 'center');
   } else {
-    if (t % 7 > 4.2) {
-      const m = MISSIONS[G.mission % 5];
+    if (G.skillArmed && laneReady()) dText('Lőj a villogó sávba', 0, 0, 1, 2, 'center');
+    else if (t % 7 > 4.2) {
+      const m = MISSIONS[G.mission % MISSIONS.length];
       dText('> ' + m.label + ' ' + G.prog + '/' + need(), 0, 0, 1, 2, 'center');
     } else {
       dText(G.ballNo + '. golyó', 1, 0, 1, 2);
@@ -680,7 +837,12 @@ function dmdCompose() {
     }
     const s = fmt(G.score);
     dText(s, 0, fitScale(s) === 2 ? 11 : 17, fitScale(s), 3, 'center');
-    if (plunger.held) for (let x = 0; x < Math.round(plunger.charge * DW); x++) { dPix(x, 30, 2); dPix(x, 31, 2); }
+    if (plunger.held) {
+      const [v0, v1] = SKILL_V[G.skillLane], z0 = Math.round(chargeFor(v0) * DW), z1 = Math.round(chargeFor(v1) * DW);
+      if (G.skillArmed) for (let x = z0; x <= z1; x++) { dPix(x, 29, 1); dPix(x, 30, 1); dPix(x, 31, 1); }
+      const end = Math.round(plunger.charge * DW), hit = G.skillArmed && end >= z0 && end <= z1;
+      for (let x = 0; x < end; x++) { dPix(x, 30, hit ? 3 : 2); dPix(x, 31, hit ? 3 : 2); }
+    }
   }
 }
 
@@ -688,6 +850,7 @@ function dmdCompose() {
 const app = $('#app'), stage = $('#stage'), tableCv = $('#table'), dmdCv = $('#dmd'), hint = $('#hint');
 const tctx = tableCv.getContext('2d'), dctx = dmdCv.getContext('2d');
 const staticCv = document.createElement('canvas'), sctx = staticCv.getContext('2d');
+const rampCv = document.createElement('canvas');
 const dmdBase = document.createElement('canvas');
 let K = 1;
 
@@ -825,14 +988,13 @@ function buildStatic() {
   c.strokeStyle = 'rgba(70, 240, 255, 0.06)'; c.lineWidth = 1;
   for (let r = 110; r < 720; r += 64) { c.beginPath(); c.arc(186, 700, r, Math.PI, TAU); c.stroke(); }
   // ringed planet
-  const px = 250, py = 500, pr = 30;
+  const px = 238, py = 515, pr = 24;
   c.strokeStyle = 'rgba(255, 173, 51, 0.32)'; c.lineWidth = 2;
   c.beginPath(); c.ellipse(px, py, pr * 1.9, pr * 0.42, -0.35, Math.PI, TAU); c.stroke();
   const pg = c.createRadialGradient(px - 10, py - 12, 3, px, py, pr);
   pg.addColorStop(0, 'rgba(190, 150, 255, 0.55)'); pg.addColorStop(0.65, 'rgba(95, 55, 175, 0.42)'); pg.addColorStop(1, 'rgba(35, 18, 80, 0.4)');
   c.fillStyle = pg; circle(c, px, py, pr); c.fill();
   c.beginPath(); c.ellipse(px, py, pr * 1.9, pr * 0.42, -0.35, 0, Math.PI); c.stroke();
-  label(c, 'NEBULA', 168, 456, 0, 'rgba(243, 240, 255, 0.07)', '400 30px Bungee, "Arial Black", sans-serif');
   // shooter lane
   c.fillStyle = 'rgba(4, 3, 14, 0.55)'; c.fillRect(352, 250, 28, 520);
   c.fillStyle = 'rgba(255, 173, 51, 0.22)';
@@ -854,7 +1016,15 @@ function buildStatic() {
   rail(c, [[352, 262], [352, 762]], '#46f0ff');
   rail(c, ORBIT_WALL, '#46f0ff');
   rail(c, GUIDE_L, '#46f0ff'); rail(c, GUIDE_R, '#46f0ff');
-  rail(c, DEFLECT_L, '#46f0ff'); rail(c, DEFLECT_R, '#46f0ff');
+  rail(c, DEFLECT_L, '#ffad33'); rail(c, DEFLECT_R, '#46f0ff');
+  rail(c, RAMP_WALL_L, '#b48cff'); rail(c, RAMP_WALL_R, '#b48cff');
+  label(c, 'RÁMPA', ...rampPt(24, 0), Math.atan2(RAMP_D[1], RAMP_D[0]), 'rgba(217, 200, 255, 0.75)');
+  // spinner axle posts
+  c.fillStyle = '#3c3870'; circle(c, SPINNER.x - SPINNER.hw - 1, SPINNER.y, 2.5); c.fill(); circle(c, SPINNER.x + SPINNER.hw + 1, SPINNER.y, 2.5); c.fill();
+  // kickback housing and its label on the cabinet edge
+  c.fillStyle = '#16123c'; c.fillRect(22, 706, 22, 24);
+  label(c, 'KICKBACK', 10, 660, -Math.PI / 2, 'rgba(255, 173, 51, 0.6)');
+  label(c, 'FÉREGLYUK', WORMS[0].x, WORMS[0].y + 21, 0, 'rgba(70, 240, 255, 0.7)');
   for (const x of DIVIDERS) rail(c, [[x, 70], [x, 108]], '#b48cff');
   // one-way gate flap
   c.strokeStyle = '#ffad33'; c.lineWidth = 2; c.lineCap = 'round';
@@ -904,6 +1074,29 @@ function buildStatic() {
   label(c, 'MENTÉS', SAVE_INS.x, SAVE_INS.y + 0.5, 0, 'rgba(255, 173, 51, 0.6)');
   for (let i = 0; i < 3; i++) { const a = -0.7 + i * 0.7; c.strokeStyle = 'rgba(255, 61, 154, 0.45)'; circle(c, HOLE.x + Math.cos(a) * 26, HOLE.y + Math.sin(a) * 26, 3.5); c.stroke(); }
   label(c, 'ORBIT', 38, 300, -Math.PI / 2, 'rgba(70, 240, 255, 0.55)');
+  buildRamp();
+}
+
+// the ramp is drawn above playfield balls, so it lives on its own layer
+function buildRamp() {
+  rampCv.width = staticCv.width; rampCv.height = staticCv.height;
+  const c = rampCv.getContext('2d');
+  c.setTransform(K, 0, 0, K, 0, 0);
+  const left = [], right = [];
+  RAMP_PATH.forEach(([x, y], i) => {
+    const a = RAMP_PATH[Math.max(0, i - 1)], b = RAMP_PATH[Math.min(RAMP_PATH.length - 1, i + 1)];
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / l, ny = (b[0] - a[0]) / l;
+    left.push([x + nx * 13, y + ny * 13]); right.push([x - nx * 13, y - ny * 13]);
+  });
+  const band = [...left, ...right.slice().reverse()];
+  c.save(); c.translate(5, 7); c.fillStyle = 'rgba(0, 0, 0, 0.28)'; fillPoly(c, band); c.restore();
+  c.fillStyle = 'rgba(120, 140, 255, 0.2)'; fillPoly(c, band);
+  c.fillStyle = 'rgba(255, 173, 51, 0.45)';
+  for (let s = 40; s < RAMP_TOTAL - 20; s += 46) { const [x, y, tx, ty] = rampAt(s); arrowPath(c, { x, y, a: Math.atan2(ty, tx) }, 6); c.fill(); }
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.save(); c.shadowColor = '#b48cff'; c.shadowBlur = 6; c.strokeStyle = '#d9c8ff'; c.lineWidth = 2;
+  strokePoly(c, left); strokePoly(c, right); c.restore();
+  c.strokeStyle = '#ffad33'; c.lineWidth = 2.5; strokePoly(c, [left[0], right[0]]);
 }
 
 // ---------- per-frame drawing ----------
@@ -922,7 +1115,8 @@ function render() {
       glow(c, s.x, s.y, 20, '70,240,255', 0.8);
       c.fillStyle = '#bffaff'; starPath(c, s.x, s.y, 8); c.fill();
     });
-    const goal = MISSIONS[G.mission % 5].arrow;
+    let goal = MISSIONS[G.mission % MISSIONS.length].arrow;
+    if (goal === 'worm' && G.wormT <= 0) goal = 'ramp';
     if (blink && G.phase === 'run') {
       const a = ARROWS[goal];
       glow(c, a.x, a.y, 24, '255,173,51', 0.8);
@@ -946,6 +1140,16 @@ function render() {
     for (let i = 0; i < G.holeCount % 3; i++) {
       const a = -0.7 + i * 0.7, x = HOLE.x + Math.cos(a) * 26, y = HOLE.y + Math.sin(a) * 26;
       glow(c, x, y, 12, '255,61,154', 0.8); c.fillStyle = '#ff9ccb'; circle(c, x, y, 3.5); c.fill();
+    }
+    if (G.kick) {
+      const a = ARROWS.kick;
+      glow(c, a.x, a.y, 20, '255,173,51', blink ? 0.8 : 0.45);
+      c.fillStyle = '#ffd28a'; arrowPath(c, a); c.fill();
+    }
+    if (((G.skillArmed && laneBall()) || G.skillActive > 0) && blink) {
+      const s = sensors[G.skillLane];
+      glow(c, s.x, s.y, 22, '255,173,51', 0.9);
+      c.fillStyle = '#ffd28a'; starPath(c, s.x, s.y, 8); c.fill();
     }
   }
 
@@ -991,6 +1195,34 @@ function render() {
     c.fillStyle = m.flash > 0.3 ? '#fff' : 'rgba(255, 255, 255, 0.75)'; starPath(c, m.x, m.y, 5.5); c.fill();
   }
 
+  // wormholes
+  const wormOpen = G.wormT > 0, wormFade = wormOpen && G.wormT < 3 && !blink ? 0.35 : 1;
+  for (const w of WORMS) {
+    c.globalAlpha = wormOpen ? wormFade : 0.3;
+    glow(c, w.x, w.y, 34, w.rgb, (wormOpen ? 0.4 : 0.15) + 0.6 * w.flash);
+    c.save(); c.translate(w.x, w.y);
+    for (let i = 0; i < 3; i++) {
+      c.rotate(-t * (2 + i) + i);
+      c.strokeStyle = `rgba(${w.rgb}, ${0.9 - i * 0.2})`; c.lineWidth = 1.6;
+      c.beginPath(); c.arc(0, 0, 14 - i * 3.5, 0, 4); c.stroke();
+    }
+    c.restore();
+    const wg = c.createRadialGradient(w.x, w.y, 0, w.x, w.y, 7);
+    wg.addColorStop(0, '#ffffff'); wg.addColorStop(0.5, `rgba(${w.rgb}, 0.9)`); wg.addColorStop(1, `rgba(${w.rgb}, 0)`);
+    c.fillStyle = wg; circle(c, w.x, w.y, 7); c.fill();
+    c.globalAlpha = 1;
+  }
+
+  // spinner flag, seen from above: its depth follows the rotation
+  const sa = Math.abs(Math.sin(SPINNER.angle)), sh = 2 + 9 * sa;
+  c.fillStyle = '#d7d4f5'; c.fillRect(SPINNER.x - SPINNER.hw, SPINNER.y - sh / 2, SPINNER.hw * 2, sh);
+  c.fillStyle = '#ff3d9a'; c.fillRect(SPINNER.x - SPINNER.hw, SPINNER.y - sh / 2, SPINNER.hw * 2, Math.max(1, sh * 0.3));
+
+  // kickback plunger
+  const kl = G.kickAnim * 14;
+  c.fillStyle = '#5c5a85'; c.fillRect(30, 712 - kl, 6, 18 + kl);
+  c.fillStyle = G.kick ? '#ffd28a' : '#9a97c4'; c.fillRect(24, 706 - kl, 18, 5);
+
   // plunger
   const top = FLOOR.ay;
   if (plunger.held) glow(c, 366, top + 10, 18 + 22 * plunger.charge, '255,173,51', 0.35 + 0.5 * plunger.charge);
@@ -1015,17 +1247,12 @@ function render() {
     c.fillStyle = '#3c3870'; circle(c, f.px, f.py, 3.5); c.fill();
   }
 
-  // balls
-  for (const b of balls) {
-    let r = R, alpha = 1;
-    if (b.capt) { const k = Math.min(1, Math.max(0, (b.capT - 0.15) / 0.35)); r = R * (1 - 0.65 * k); alpha = 1 - 0.8 * k; }
-    c.globalAlpha = alpha;
-    c.fillStyle = 'rgba(0, 0, 0, 0.35)'; circle(c, b.x + 2.5, b.y + 3.5, r); c.fill();
-    const bg = c.createRadialGradient(b.x - r * 0.35, b.y - r * 0.45, r * 0.1, b.x, b.y, r);
-    bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.35, '#d5d6ea'); bg.addColorStop(0.8, '#6a6d94'); bg.addColorStop(1, '#25263f');
-    c.fillStyle = bg; circle(c, b.x, b.y, r); c.fill();
-    c.globalAlpha = 1;
-  }
+  // balls on the playfield, then the ramp layer, then balls riding the ramp
+  for (const b of balls) if (!b.ramp) drawBall(c, b);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.drawImage(rampCv, 0, 0);
+  c.setTransform(K, 0, 0, K, 0, 0);
+  for (const b of balls) if (b.ramp) drawBall(c, b);
 
   // floating scores
   c.font = '700 11px "Chakra Petch", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
@@ -1033,6 +1260,19 @@ function render() {
     c.globalAlpha = Math.min(1, p.t * 1.5);
     c.fillStyle = '#ffd28a'; c.fillText(p.text, p.x, p.y - (1 - p.t) * 22);
   }
+  c.globalAlpha = 1;
+}
+
+function drawBall(c, b) {
+  let r = R, alpha = 1, h = 0;
+  if (b.capt) { const k = Math.min(1, Math.max(0, (b.capT - 0.15) / 0.35)); r = R * (1 - 0.65 * k); alpha = 1 - 0.8 * k; }
+  if (b.warp) { const k = Math.min(1, b.warp.t / 0.3); r = R * (1 - 0.8 * k); alpha = 1 - 0.7 * k; }
+  if (b.ramp) { h = Math.sin(Math.PI * b.ramp.s / RAMP_TOTAL); r = R * (1 + 0.15 * h); }
+  c.globalAlpha = alpha;
+  c.fillStyle = `rgba(0, 0, 0, ${0.35 - 0.12 * h})`; circle(c, b.x + 2.5 + 6 * h, b.y + 3.5 + 8 * h, r); c.fill();
+  const bg = c.createRadialGradient(b.x - r * 0.35, b.y - r * 0.45, r * 0.1, b.x, b.y, r);
+  bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.35, '#d5d6ea'); bg.addColorStop(0.8, '#6a6d94'); bg.addColorStop(1, '#25263f');
+  c.fillStyle = bg; circle(c, b.x, b.y, r); c.fill();
   c.globalAlpha = 1;
 }
 
@@ -1169,7 +1409,7 @@ function boot(data) {
   requestAnimationFrame(frame);
 }
 
-window.__nebula = { G, get balls() { return balls; }, step, tick, flippers, launch, newGame, laneReady, DT };
+window.__nebula = { launchSpeed, SKILL_V, chargeFor, G, get balls() { return balls; }, step, tick, flippers, launch, newGame, laneReady, DT, SPINNER, WORMS, RAMP_TOTAL, rampPt, RAMP_D };
 const hot = window.claude?.hot;
 try {
   hot?.snapshot?.(() => ({
