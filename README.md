@@ -35,15 +35,18 @@ A kijelző időnként mutatja az aktuális küldetést (pl. `> ORBIT 1/2`), a p�
 
 Egy játék 3 golyóból áll. A golyó elvesztésekor a bónusz × szorzó hozzáadódik a pontszámhoz. A rekordot a böngésző megjegyzi.
 
-## Telepítés iPhone-ra
+## Telepítés iPhone-ra, offline játékkal
 
-A játéknak egy weboldalon kell futnia, ehhez a legegyszerűbb a GitHub Pages:
+A játéknak egyszer egy weboldalról kell betöltődnie, utána internet nélkül is fut. A legegyszerűbb tárhely a GitHub Pages. Ingyenes GitHub-fiókkal ez csak nyilvános repóval működik.
 
-1. A GitHubon nyisd meg a repót, majd: **Settings → Pages**.
-2. A **Source** legyen *Deploy from a branch*, a branch *main*, a mappa */ (root)*. Mentsd el.
+1. Ha a repó privát: **Settings → General**, legalul **Danger Zone → Change repository visibility → Public**.
+2. **Settings → Pages**: a **Source** legyen *Deploy from a branch*, a branch *main*, a mappa */ (root)*. Mentsd el.
 3. Pár perc múlva a játék elérhető lesz a `https://<felhasználónév>.github.io/<repó-neve>/` címen.
 4. iPhone-on nyisd meg ezt a címet **Safariban**, koppints a **Megosztás** gombra, majd a **Főképernyőhöz adás** pontra.
-5. A Főképernyőn megjelenik a **Nebula** ikon, ami teljes képernyőn indítja a játékot.
+5. Indítsd el egyszer a Főképernyőn megjelent **Nebula** ikonról, amíg van internet. Ekkor a játék elmenti magát a telefonra.
+6. Ezután internet nélkül is indul, teljes képernyőn.
+
+Ha új verzió kerül fel, az app a következő internetes indításkor magától frissül.
 
 Tipp: ha nem szól a hang, kapcsold ki a telefon némítókapcsolóját.
 
@@ -59,3 +62,4 @@ python3 -m http.server 8000
 
 - `index.html`: a teljes játék (fizika, grafika, hang, irányítás)
 - `manifest.webmanifest`, `icons/`: a Főképernyő-ikonhoz és a teljes képernyős indításhoz
+- `sw.js`: az offline mód, ami az első megnyitáskor elmenti a játékot, az ikonokat és a betűtípusokat
