@@ -327,7 +327,7 @@ function resetGame() {
   Object.assign(G, {
     score: 0, ballNo: 1, extra: 0, rank: 0, mission: 0, prog: 0, mult: 1, bonus: 0,
     lanes: [0, 0, 0], laneFlash: 0, holeCount: 0, multiball: false, ejectQ: 0, ejectT: 0,
-    saveT: 0, saveArmed: true, serve: 1, auto: 0, autoT: 0, bankReset: 0,
+    saveT: 0, saveArmed: true, serve: 1, auto: 0, autoT: 0, laneWait: 0, bankReset: 0,
     phase: 'run', phaseT: 0, msg: null, msgQ: [], launched: false, newRecord: false,
     kick: true, kickCharge: 0, kickAnim: 0, wormT: 0, skillArmed: true, skillActive: 0, skillLane: 1, skillT: 0,
   });
@@ -342,7 +342,12 @@ const newBall = (x, y) => ({
   ramp: null, warp: null, noWarp: 0, kickT: 0,
 });
 const inLane = b => !b.capt && b.x > 352 && b.y > 250;
-const laneBall = () => balls.find(b => !b.capt && b.x > 352 && b.y > 560);
+// the lowest ball in the shooter lane is the one resting on the plunger
+const laneBall = () => {
+  let low = null;
+  for (const b of balls) if (!b.capt && b.x > 352 && b.y > 560 && (!low || b.y > low.y)) low = b;
+  return low;
+};
 function laneReady() { const b = laneBall(); return !!b && b.y > 690 && Math.abs(b.vy) < 40; }
 const need = () => MISSIONS[G.mission % MISSIONS.length].n * (1 + Math.floor(G.mission / MISSIONS.length));
 
@@ -677,11 +682,15 @@ function tick(dt) {
     const b = newBall(HOLE.x, HOLE.y); balls.push(b); eject(b);
     G.ejectQ--; G.ejectT = 0.7;
   }
-  if (G.serve > 0 && !balls.some(b => !b.capt && b.x > 352 && b.y > 400)) {
+  if (G.serve > 0 && !balls.some(inLane)) {  // only into an empty lane, so balls never stack on the plunger
     G.serve--; balls.push(newBall(366, 700));
     if (G.auto > 0) { G.auto--; G.autoT = 0.7; }
   }
   if (G.autoT > 0 && (G.autoT -= dt) <= 0) { if (laneReady()) launch(0.92, true); else G.autoT = 0.1; }
+  // a ball left waiting in the lane while others are in play is launched for the player
+  if (laneReady() && !plunger.held && balls.some(b => !inLane(b))) {
+    if ((G.laneWait += dt) > 2.5) { G.laneWait = 0; launch(0.92, true); }
+  } else G.laneWait = 0;
   if (G.saveT > 0 && balls.some(b => !inLane(b))) G.saveT -= dt;
   if (G.bankReset > 0 && (G.bankReset -= dt) <= 0) {
     if (balls.some(b => !b.ramp && b.x > 324 && b.y > 290 && b.y < 404)) G.bankReset = 0.3;
@@ -1305,7 +1314,8 @@ addEventListener('pointerdown', e => {
   if (G.state !== 'play' || e.target.closest('button, .overlay')) return;
   audio.init();
   let z = e.clientX < innerWidth / 2 ? 'L' : 'R';
-  if (z === 'R' && laneReady() && ![...pointers.values()].includes('P')) z = 'P';
+  // the right side works the plunger only while no ball is in play; otherwise it is always the flipper
+  if (z === 'R' && laneReady() && balls.every(inLane) && ![...pointers.values()].includes('P')) z = 'P';
   pointers.set(e.pointerId, z);
   syncInput();
 });
